@@ -8,3 +8,6 @@ How to use:
 3. pip install discord discord.py watchdog requests pynacl pytz
 4. Use pm2 to start the bots, eg. pm2 start q3logbot.py
 
+
+Current limitations:
+JK2 doesn't log connects or disconnects, Mumble doesn't log chat (Murmur itself doesn't write it to logs), and UT99 doesn't log chat or disconnects.
