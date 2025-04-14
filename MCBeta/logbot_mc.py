@@ -20,6 +20,7 @@ EMBED_COLORS = {
 JOIN_PATTERN = re.compile(r"\[INFO\] (?P<name>\w+) \[\/[\d.:]+\] logged in with entity id \d+ at")
 LEAVE_PATTERN = re.compile(r"\[INFO\] (?P<name>\w+) lost connection: (?P<reason>.+)")
 CHAT_PATTERN = re.compile(r"\[INFO\] <(?P<name>\w+)> (?P<message>.+)")
+CMD_PATTERN = re.compile(r"\[INFO\] (?P<name>\w+) issued server command: (?P<servercmd>.+)")
 
 def get_avatar_url(username):
     return f"https://minotar.net/helm/{username}/64.png"
@@ -66,6 +67,11 @@ def parse_log():
                 name = match.group("name")
                 message = match.group("message")
                 send_discord_embed(name, message, EMBED_COLORS["chat"])
+                
+            elif match := CMD_PATTERN.search(line):
+                name = match.group("name")
+                servercmd = match.group("servercmd")
+                send_discord_embed(name, f"issued server command: ({servercmd})", EMBED_COLORS["chat"])                
 
 if __name__ == "__main__":
     print("Watching log file for events...")
