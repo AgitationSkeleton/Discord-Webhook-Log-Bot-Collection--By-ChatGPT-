@@ -4,8 +4,8 @@ import requests
 from pathlib import Path
 
 # Configuration
-LOG_FILE_PATH = r"YOUR_PATH_TO_JK2_HERE\jk2\GameData\base\qconsole.log"
-DISCORD_WEBHOOK_URL = "YOUR_WEBHOOK_URL_HERE"
+LOG_FILE_PATH = r"PATH_TO_QCONSOLE_qconsole.log"
+DISCORD_WEBHOOK_URL = "Your webhook url here"
 IGNORE_LIST_FILE = "ignore_list.txt"
 
 # Embed Colors
@@ -14,8 +14,8 @@ COLOR_DISCONNECT = 0xFF0000  # Red
 COLOR_CHAT = 0x808080  # Gray (for chat)
 
 # Patterns
-JOIN_PATTERN = re.compile(r'broadcast: print "(.*?) \@\@\@PLCONNECT"')
-DISCONNECT_PATTERN = re.compile(r'broadcast: print "(.*?) \@\@\@DISCONNECTED"')
+JOIN_PATTERN = re.compile(r'broadcast: print "(.*?)\s+\@\@\@PLCONNECT\\n?"')
+DISCONNECT_PATTERN = re.compile(r'broadcast: print "(.*?)\s+\@\@\@DISCONNECTED\\n?"')
 CHAT_PATTERN = re.compile(r'say: (.+?): (.+)')
 
 def load_ignore_list(file_path):
@@ -31,7 +31,9 @@ def load_ignore_list(file_path):
 
 def sanitize_text(text):
     """Remove color codes (e.g., ^1, ^2, etc.) and trim whitespace."""
-    return re.sub(r"\^\d", "", text).strip()
+    sanitized_text = re.sub(r"\^\d", "", text).strip()  # Remove color codes and trim spaces
+    print(f"Sanitized text: '{sanitized_text}'")  # Debugging output
+    return sanitized_text
 
 def send_to_discord(message, color):
     """Send a message to Discord."""
@@ -64,21 +66,25 @@ def monitor_log(file_path, ignore_list):
                     line = line.strip()
                     print(f"Processing line: {line}")  # Debugging output
 
-                    # Player join (PLCONNECT)
+                    # Player join (PLCONNECT) from broadcast line
                     if match := JOIN_PATTERN.search(line):
                         raw_username = match.group(1)
                         username = sanitize_text(raw_username)
                         print(f"Detected join: raw='{raw_username}', sanitized='{username}'")  # Debugging output
                         if username.lower() not in ignore_list:
                             send_to_discord(f"{username} joined the game", COLOR_JOIN)
+                        else:
+                            print(f"Ignored join from: {username}")  # Debugging output
                     
-                    # Player disconnect (DISCONNECTED)
+                    # Player disconnect (DISCONNECTED) from broadcast line
                     elif match := DISCONNECT_PATTERN.search(line):
                         raw_username = match.group(1)
                         username = sanitize_text(raw_username)
                         print(f"Detected disconnect: raw='{raw_username}', sanitized='{username}'")  # Debugging output
                         if username.lower() not in ignore_list:
                             send_to_discord(f"{username} disconnected", COLOR_DISCONNECT)
+                        else:
+                            print(f"Ignored disconnect from: {username}")  # Debugging output
                     
                     # Player chat (remains unchanged)
                     elif match := CHAT_PATTERN.search(line):
