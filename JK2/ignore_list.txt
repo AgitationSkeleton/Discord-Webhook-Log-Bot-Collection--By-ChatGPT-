@@ -13,6 +13,7 @@ Bespin_Officer
 Boba_Fett
 C-3PO
 C3PO
+Captain_Solo
 Chewbacca
 Chiss
 Commander
@@ -27,9 +28,11 @@ EpisodeIII_Yoda_Kaio
 Fierce_Deity
 Galak
 General Kenobi
+General_Solo
 Geonosis
 George Lucas
 Gungan
+Han_Solo
 IW-323
 Indiana_Jones
 Infantry
@@ -46,6 +49,7 @@ Lannik_Racto
 Lieutenant_Cabbel
 Link
 Luke
+MaceWinduVM
 Mara
 Mara_ponytail
 Maul
