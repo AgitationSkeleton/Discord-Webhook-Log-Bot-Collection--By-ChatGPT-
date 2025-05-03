@@ -32,6 +32,14 @@ FFMPEG_OPTIONS = {
 async def on_ready():
     print(f'Logged in as {bot.user}')
 
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.guild.voice_client:
+        vc = member.guild.voice_client
+        if vc.channel and len([m for m in vc.channel.members if not m.bot]) == 0:
+            await vc.disconnect()
+            queue.clear()
+
 async def connect_to_voice(ctx):
     if ctx.author.voice is None:
         await ctx.send("You're not in a voice channel.")
@@ -127,7 +135,7 @@ async def resume(ctx):
     else:
         await ctx.send("Nothing is paused.")
 
-@bot.command(aliases=['q'])
+@bot.command(aliases=['q', 'queue'])
 async def queue_(ctx):
     if queue:
         ytdl = yt_dlp.YoutubeDL({'quiet': True})
@@ -147,10 +155,16 @@ async def queue_(ctx):
         await ctx.send("Queue is empty.")
 
 @bot.command()
+async def clear(ctx):
+    queue.clear()
+    await ctx.send("Queue cleared.")
+
+@bot.command()
 async def stop(ctx):
     vc = discord.utils.get(bot.voice_clients, guild=ctx.guild)
     if vc and vc.is_connected():
         await vc.disconnect()
+        queue.clear()
         await ctx.send("Disconnected.")
     else:
         await ctx.send("Not connected.")
