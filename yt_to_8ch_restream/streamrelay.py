@@ -19,8 +19,8 @@ googleapiclient._helpers.positional_parameters_enforcement = None
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # YouTube and RTMP config
-YOUTUBE_CHANNEL_ID = "UCpmFso2r78-omUEXDzxsX2g"  # ghostpolitics
-YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY_HERE"  # Replace with your API key
+YOUTUBE_CHANNEL_ID = "YOUR_CHANNEL_ID_HERE"
+YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY_HERE"
 RTMP_URL = "rtmp://8chan.tv/stream/YOUR_KEY_HERE"
 DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_HERE"
 
@@ -129,12 +129,12 @@ async def monitor_youtube():
         is_live = video_id is not None
 
         if is_live and not last_live:
-            logging.info("Ghost is now live on YouTube. Starting restream...")
+            logging.info("Channel is now live. Starting restream...")
             await try_start_ffmpeg()
             last_live = True
 
         elif not is_live and last_live:
-            logging.info("Ghost is now offline. Stopping restream...")
+            logging.info("Channel is now offline. Stopping restream...")
             stop_ffmpeg()
             last_live = False
 
