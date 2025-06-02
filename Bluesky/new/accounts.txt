@@ -1,0 +1,5 @@
+[did:plc:fgsfds]
+webhook=https://discord.com/api/webhooks/2222/efgh
+
+[did:plc:fgsfds]
+webhook=https://discord.com/api/webhooks/2222/efgh
