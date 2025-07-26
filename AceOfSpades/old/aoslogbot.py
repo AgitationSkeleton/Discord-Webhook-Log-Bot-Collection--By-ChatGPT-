@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 
 # Configuration
-DISCORD_WEBHOOK_URL = "your webhook url here"
+DISCORD_WEBHOOK_URL = "yourwebhookurlhere"
 LOG_FILE_PATH = r"C:\Users\Administrator\.config\piqueserver\logs\log.txt"  # Adjust if needed
 
 # Regex patterns
@@ -34,7 +34,7 @@ def monitor_log():
         try:
             with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
                 for line in f:
-                    if line in seen or "[B]" in line:
+                    if line in seen:
                         continue
                     seen.add(line)
 
