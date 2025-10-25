@@ -151,10 +151,13 @@ function OnLeave(pid)
 end
 
 function OnChat(pid, message)
-    if not CONFIG.RELAY_CHAT then return false end
-    if not message or message == "" then return false end
+    if not CONFIG.RELAY_CHAT then return true end
+    if not message or message == "" then return true end
+
     local name = get_var(pid, "$name") or ("Player#" .. tostring(pid))
     local formatted = server_prefix() .. "[CHAT] " .. name .. ": " .. message
     post_to_discord(formatted)
-    return false
+
+    return true   -- allow Halo to broadcast the chat
 end
+
