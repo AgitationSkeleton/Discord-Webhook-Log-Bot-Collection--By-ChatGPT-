@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Refresh Selected Pages",
+  "version": "1.0.0",
+  "description": "Automatically refreshes specific configured pages every 5 minutes.",
+  "permissions": ["alarms", "storage", "tabs"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Auto Refresh Selected Pages"
+  }
+}

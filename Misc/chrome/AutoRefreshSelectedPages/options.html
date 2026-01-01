@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Auto Refresh Selected Pages - Settings</title>
+    <style>
+      body {
+        font-family: system-ui, Arial, sans-serif;
+        margin: 16px;
+        max-width: 900px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 240px;
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 13px;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .row {
+        margin-top: 12px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      button {
+        padding: 8px 12px;
+      }
+      .status {
+        font-size: 13px;
+        opacity: 0.9;
+      }
+      .hint {
+        font-size: 13px;
+        opacity: 0.85;
+        line-height: 1.35;
+      }
+      code {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Auto Refresh Selected Pages - Settings</h2>
+
+    <p class="hint">
+      Enter one URL per line. Rules:
+      <br />- Exact matches refresh that exact page.
+      <br />- If a line ends with a trailing slash (example: <code>https://example.com/</code>),
+      it will refresh any page under that site/path.
+      <br />- If you omit the scheme, <code>https://</code> is assumed.
+    </p>
+
+    <label for="urlList"><strong>Pages to auto-refresh</strong></label>
+    <textarea id="urlList" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="saveBtn">Save</button>
+      <button id="resetBtn">Reset to defaults</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
