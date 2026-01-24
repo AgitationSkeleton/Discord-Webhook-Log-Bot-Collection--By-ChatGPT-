@@ -2,8 +2,11 @@ import datetime
 import logging
 import socket
 import struct
+import threading
 import time
-from typing import List, Tuple
+import random
+import io
+from typing import List, Tuple, Optional
 
 import requests
 
@@ -37,6 +40,45 @@ INTERVAL_MINUTES = 15
 RUN_ON_STARTUP = True
 
 SOCKET_TIMEOUT_SEC = 3.0
+
+
+# ============================================================
+# Optional: GameSpy4 / "Minecraft query" UDP bridge
+# ============================================================
+#
+# Purpose:
+#   Tools like GameTracker/GameDig can query Minecraft servers using the old
+#   GameSpy4 UDP protocol (0xFE 0xFD handshake + stat). Hytale doesn't speak
+#   this protocol, so this script can optionally expose a *separate* UDP port
+#   (default 5521) that replies in Minecraft's GameSpy4 format using data
+#   pulled from HyQuery.
+#
+# Notes:
+#   - This does NOT change how the script queries Hytale (still HyQuery).
+#   - It also does NOT replace the Discord watcher behavior.
+#   - If you don't need the bridge, set BRIDGE_ENABLED = False.
+
+BRIDGE_ENABLED = True
+BRIDGE_BIND_HOST = "0.0.0.0"
+BRIDGE_LISTEN_PORT = 5521
+
+# How often to refresh cached HyQuery data for the bridge.
+# (Querying on every inbound UDP packet would also work, but caching makes
+# bursty tool queries cheaper.)
+BRIDGE_REFRESH_SECONDS = 10.0
+
+# Values used to make the response look Minecraft-like
+BRIDGE_GAME_TYPE = "SMP"
+BRIDGE_GAME_ID = "MINECRAFT"
+BRIDGE_MAP_NAME = "world"
+BRIDGE_PLUGINS_STRING = "HytaleQueryBridge"
+
+# Optional overrides (off by default)
+BRIDGE_OVERRIDE_HOSTNAME_ENABLED = False
+BRIDGE_OVERRIDE_HOSTNAME = "Hytale Server"
+
+BRIDGE_OVERRIDE_MAP_ENABLED = False
+BRIDGE_OVERRIDE_MAP_NAME = "world"
 
 
 # ============================================================
@@ -143,6 +185,243 @@ def hyquery_full(
             _plugin_name = _read_string(data, cur)
 
     return server_name, motd, online, max_players, port_in_resp, version, player_names
+
+
+# ============================================================
+# GameSpy4 / "Minecraft query" bridge implementation
+# ============================================================
+
+class BridgeCache:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.last_ok_utc: float = 0.0
+        self.server_name: str = ""
+        self.motd: str = ""
+        self.online: int = 0
+        self.max_players: int = 0
+        self.port_in_resp: int = 0
+        self.version: str = ""
+        self.player_names: List[str] = []
+        self.last_error: str = ""
+
+
+def _resolve_ipv4_string(hostname: str) -> str:
+    try:
+        addrs = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_DGRAM)
+        if addrs:
+            return str(addrs[0][4][0])
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+
+def _parse_display_hostport(display_server_ip: str) -> Tuple[str, int]:
+    # Best-effort parse for "host:port"; if it doesn't match, fall back.
+    if ":" in display_server_ip:
+        host_part, port_part = display_server_ip.rsplit(":", 1)
+        try:
+            return host_part.strip(), int(port_part.strip())
+        except Exception:
+            return display_server_ip.strip(), 0
+    return display_server_ip.strip(), 0
+
+
+def _write_ascii(out: io.BytesIO, text: str) -> None:
+    out.write(text.encode("utf-8", errors="replace"))
+
+
+def _build_gamespy_handshake_reply(session_id: int, challenge_token: int) -> bytes:
+    # 0x09 + session_id (int32 BE) + token ASCII + null
+    token_ascii = str(challenge_token).encode("ascii")
+    return struct.pack(">Bi", 0x09, session_id) + token_ascii + b"\x00"
+
+
+def _build_gamespy_fullstat_reply(
+    session_id: int,
+    hostname: str,
+    version: str,
+    map_name: str,
+    num_players: int,
+    max_players: int,
+    host_port: int,
+    host_ip: str,
+    player_names: List[str],
+) -> bytes:
+    out = io.BytesIO()
+
+    # Header
+    out.write(struct.pack(">Bi", 0x00, session_id))
+
+    # splitnum\0 0x80 0x00
+    _write_ascii(out, "splitnum")
+    out.write(b"\x00\x80\x00")
+
+    # Key/value pairs (ASCII, null-separated)
+    def kv(k: str, v: str) -> None:
+        _write_ascii(out, k)
+        out.write(b"\x00")
+        _write_ascii(out, v)
+        out.write(b"\x00")
+
+    kv("hostname", hostname)
+    kv("gametype", BRIDGE_GAME_TYPE)
+    kv("game_id", BRIDGE_GAME_ID)
+    kv("version", version)
+    kv("plugins", BRIDGE_PLUGINS_STRING)
+    kv("map", map_name)
+    kv("numplayers", str(num_players))
+    kv("maxplayers", str(max_players))
+    kv("hostport", str(host_port))
+    kv("hostip", host_ip)
+
+    # End of key/value section
+    out.write(b"\x00")
+
+    # Player section
+    out.write(b"\x01")
+    _write_ascii(out, "player_")
+    out.write(b"\x00\x00")
+    for name in player_names:
+        _write_ascii(out, name)
+        out.write(b"\x00")
+
+    # Two nulls at the end (matches modern servers)
+    out.write(b"\x00\x00")
+    return out.getvalue()
+
+
+class HyQueryPoller(threading.Thread):
+    def __init__(self, cache: BridgeCache) -> None:
+        super().__init__(daemon=True)
+        self.cache = cache
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                server_name, motd, online, max_players, port_in_resp, version, player_names = hyquery_full(
+                    HYQUERY_HOST,
+                    HYQUERY_PORT,
+                    SOCKET_TIMEOUT_SEC,
+                )
+
+                with self.cache.lock:
+                    self.cache.last_ok_utc = time.time()
+                    self.cache.server_name = server_name
+                    self.cache.motd = motd
+                    self.cache.online = online
+                    self.cache.max_players = max_players
+                    self.cache.port_in_resp = port_in_resp
+                    self.cache.version = version
+                    self.cache.player_names = list(player_names)
+                    self.cache.last_error = ""
+            except Exception as e:
+                with self.cache.lock:
+                    self.cache.last_error = str(e)
+            finally:
+                self._stop_event.wait(BRIDGE_REFRESH_SECONDS)
+
+
+class GameSpyQueryBridge(threading.Thread):
+    def __init__(self, cache: BridgeCache) -> None:
+        super().__init__(daemon=True)
+        self.cache = cache
+        self._stop_event = threading.Event()
+        self._sock: Optional[socket.socket] = None
+        self._session_tokens: dict[int, int] = {}
+        self._session_lock = threading.Lock()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        try:
+            if self._sock:
+                self._sock.close()
+        except Exception:
+            pass
+
+    def _get_or_create_token(self, session_id: int) -> int:
+        with self._session_lock:
+            token = self._session_tokens.get(session_id)
+            if token is None:
+                token = random.randint(1, 0x7FFFFFFF)
+                self._session_tokens[session_id] = token
+            return token
+
+    def run(self) -> None:
+        try:
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._sock.bind((BRIDGE_BIND_HOST, BRIDGE_LISTEN_PORT))
+            self._sock.settimeout(0.5)
+        except Exception:
+            logging.exception("Bridge: failed to bind UDP/%d", BRIDGE_LISTEN_PORT)
+            return
+
+        logging.info("Bridge: listening for GameSpy4 query on %s:%d", BRIDGE_BIND_HOST, BRIDGE_LISTEN_PORT)
+
+        display_host, display_port = _parse_display_hostport(DISPLAY_SERVER_IP)
+        host_ip = _resolve_ipv4_string(display_host)
+        host_port = display_port if display_port > 0 else HYQUERY_PORT
+
+        while not self._stop_event.is_set():
+            try:
+                data, addr = self._sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            try:
+                # Expect: 0xFE 0xFD <type> <sessionId(4)> ...
+                if len(data) < 7 or data[0] != 0xFE or data[1] != 0xFD:
+                    continue
+
+                req_type = data[2]
+                session_id = struct.unpack(">i", data[3:7])[0]
+
+                if req_type == 0x09:
+                    token = self._get_or_create_token(session_id)
+                    resp = _build_gamespy_handshake_reply(session_id, token)
+                    self._sock.sendto(resp, addr)
+                    continue
+
+                if req_type == 0x00:
+                    with self.cache.lock:
+                        hostname = self.cache.server_name or "Hytale Server"
+                        version = self.cache.version or "Hytale"
+                        num_players = int(self.cache.online)
+                        max_players = int(self.cache.max_players)
+                        players = list(self.cache.player_names)
+
+                    # Optional overrides (off by default)
+                    if BRIDGE_OVERRIDE_HOSTNAME_ENABLED:
+                        hostname = BRIDGE_OVERRIDE_HOSTNAME
+
+                    map_name = BRIDGE_MAP_NAME
+                    if BRIDGE_OVERRIDE_MAP_ENABLED:
+                        map_name = BRIDGE_OVERRIDE_MAP_NAME
+
+
+                    resp = _build_gamespy_fullstat_reply(
+                        session_id=session_id,
+                        hostname=hostname,
+                        version=version,
+                        map_name=map_name,
+                        num_players=num_players,
+                        max_players=max_players,
+                        host_port=host_port,
+                        host_ip=host_ip,
+                        player_names=players,
+                    )
+                    self._sock.sendto(resp, addr)
+                    continue
+
+            except Exception:
+                # Never let a bad packet crash the bridge.
+                logging.debug("Bridge: failed to handle packet", exc_info=True)
+
 
 
 # ============================================================
@@ -265,14 +544,34 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     logging.info("Starting server watcher (runs every %d minutes).", INTERVAL_MINUTES)
 
+    # Start the optional GameSpy4 bridge (separate UDP port) without affecting
+    # the Discord watcher behavior.
+    bridge_cache: Optional[BridgeCache] = None
+    poller: Optional[HyQueryPoller] = None
+    bridge: Optional[GameSpyQueryBridge] = None
+    if BRIDGE_ENABLED:
+        bridge_cache = BridgeCache()
+        poller = HyQueryPoller(bridge_cache)
+        bridge = GameSpyQueryBridge(bridge_cache)
+        poller.start()
+        bridge.start()
+
     if RUN_ON_STARTUP:
         run_check_once()
 
-    while True:
-        sleep_seconds = seconds_until_next_interval(INTERVAL_MINUTES)
-        logging.info("Sleeping %.1f seconds until next check.", sleep_seconds)
-        time.sleep(sleep_seconds)
-        run_check_once()
+    try:
+        while True:
+            sleep_seconds = seconds_until_next_interval(INTERVAL_MINUTES)
+            logging.info("Sleeping %.1f seconds until next check.", sleep_seconds)
+            time.sleep(sleep_seconds)
+            run_check_once()
+    except KeyboardInterrupt:
+        logging.info("Stopping...")
+    finally:
+        if bridge is not None:
+            bridge.stop()
+        if poller is not None:
+            poller.stop()
 
 
 if __name__ == "__main__":
