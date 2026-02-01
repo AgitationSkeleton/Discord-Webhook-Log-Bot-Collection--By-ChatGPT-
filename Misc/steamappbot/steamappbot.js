@@ -224,21 +224,35 @@ async function getReviewSummary(appid) {
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  // Use "all" / "summary" so we get totals quickly.
-  // Also request JSON
   const url =
-    `https://store.steampowered.com/appreviews/${encodeURIComponent(appid)}` +
-    `?json=1&filter=summary&language=all&purchase_type=all&review_type=all`;
+  `https://store.steampowered.com/appreviews/${encodeURIComponent(appid)}` +
+  `?json=1&filter=summary&language=all&purchase_type=all&review_type=all` +
+  `&num_per_page=0&cursor=*`;
+
 
   const json = await fetchJson(url);
+	console.log("REVIEWS DEBUG", appid, {
+	success: json?.success,
+	review_score_desc: json?.review_score_desc,
+	query_summary: json?.query_summary,
+	error: json?.error,
+	});
 
+
+  // If an app has no public reviews / no store reviews available, these may be missing.
   const summary = json?.query_summary;
-  const reviewScoreDesc = json?.review_score_desc; // e.g., "Mixed", "Very Positive"
-  const totalPositive = summary?.total_positive ?? null;
-  const totalNegative = summary?.total_negative ?? null;
+  const reviewScoreDesc = summary?.review_score_desc; // e.g., "Mixed", "Very Positive"
+  const totalPositive = summary?.total_positive;
+  const totalNegative = summary?.total_negative;
 
-  if (!reviewScoreDesc || !Number.isFinite(totalPositive) || !Number.isFinite(totalNegative)) {
-    throw new Error("Steam Store did not return a valid review summary.");
+  // Return null instead of throwing.
+  if (
+    !reviewScoreDesc ||
+    !Number.isFinite(totalPositive) ||
+    !Number.isFinite(totalNegative)
+  ) {
+    cache.set(cacheKey, null, 5 * 60 * 1000);
+    return null;
   }
 
   const total = totalPositive + totalNegative;
@@ -246,7 +260,7 @@ async function getReviewSummary(appid) {
 
   const result = {
     label: String(reviewScoreDesc),
-    percentPositive: percentPositive,
+    percentPositive,
     totalPositive,
     totalNegative,
     totalReviews: total,
@@ -306,12 +320,18 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    if (isReviews) {
-      const summary = await getReviewSummary(appid);
-      const pct = summary.percentPositive.toFixed(2);
-      await message.reply(`Reviews are **${summary.label}** (${pct}%) for **${appName}**.`);
-      return;
-    }
+	if (isReviews) {
+	const summary = await getReviewSummary(appid);
+	
+	if (!summary) {
+		await message.reply(`No public Steam review summary is available for **${appName}**.`);
+		return;
+	}
+	
+	const pct = summary.percentPositive.toFixed(2);
+	await message.reply(`Reviews are **${summary.label}** (${pct}%) for **${appName}**.`);
+	return;
+	}	
   } catch (err) {
     console.error(err);
     await message.reply("Something went wrong fetching Steam data. Try again in a moment.");
