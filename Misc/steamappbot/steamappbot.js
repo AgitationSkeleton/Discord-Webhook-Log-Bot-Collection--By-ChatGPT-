@@ -44,6 +44,9 @@ const builtInAliases = new Map([
   ["tfc", "20"],   // Team Fortress Classic
   ["deathmatchclassic", "40"],
   ["teamfortressclassic", "20"],
+  ["ff", "253530"],
+  ["fortressforever", "253530"],
+  ["fortress forever", "253530"], // optional if you ever change normalization
 ]);
 
 
@@ -128,12 +131,18 @@ async function resolveApp(inputText) {
     return { appid: aliasAppid, name, error: name ? null : "Could not fetch app name." };
   }
 
-  // 3) Store search (keyword / exact)
-  const searchResult = await storeSearchFirst(trimmed);
-  if (!searchResult) {
-    return { appid: null, name: null, error: `No results found for "${trimmed}".` };
-  }
-  return { appid: String(searchResult.appid), name: searchResult.name, error: null };
+	let searchResult = await storeSearchFirst(trimmed);
+	
+	if (!searchResult) {
+	searchResult = await communitySearchFirst(trimmed);
+	}
+	
+	if (!searchResult) {
+	return { appid: null, name: null, error: `No results found for "${trimmed}".` };
+	}
+	
+	return { appid: String(searchResult.appid), name: searchResult.name, error: null };
+	
 }
 
 /**
@@ -186,6 +195,28 @@ async function storeSearchFirst(queryText) {
   cache.set(cacheKey, result, 10 * 60 * 1000);
   return result;
 }
+
+async function communitySearchFirst(queryText) {
+  const normalized = queryText.trim().toLowerCase();
+  const cacheKey = `communitysearch:${normalized}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  // Returns an array like: [{ appid: "440", name: "Team Fortress 2" }, ...]
+  const url = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(queryText)}`;
+  const json = await fetchJson(url);
+
+  const firstItem = Array.isArray(json) ? json[0] : null;
+  if (!firstItem?.appid || !firstItem?.name) {
+    cache.set(cacheKey, null, 10 * 60 * 1000);
+    return null;
+  }
+
+  const result = { appid: String(firstItem.appid), name: String(firstItem.name) };
+  cache.set(cacheKey, result, 10 * 60 * 1000);
+  return result;
+}
+
 
 /**
  * Current players via Steam Web API.
